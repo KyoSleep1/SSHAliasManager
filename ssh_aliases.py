@@ -1,8 +1,9 @@
 import argparse
+import os
 import sys
 from pathlib import Path
 
-from ssh_config import SSHConfig
+from ssh_config import WINDOWS, SSHConfig
 from ssh_key_setup import setup_key, setup_new_alias
 
 
@@ -51,13 +52,23 @@ def import_aliases(config, path):
         print("Skipped existing aliases " + ", ".join(skipped) + ".")
 
 
+def clear_screen():
+    if sys.stdout.isatty():
+        if WINDOWS:
+            os.system("cls")
+        else:
+            print("\033[2J\033[H", end="", flush=True)
+
+
 def menu(config):
+    clear_screen()
     while True:
         print(f"\n{APP_NAME}\n1. List\n2. Add\n3. Rename\n4. Remove\n5. Import\n0. Quit")
         action = input("Choose an option: ").strip()
+        if action == "0":
+            return
+        clear_screen()
         try:
-            if action == "0":
-                return
             if action == "1":
                 list_aliases(config)
             elif action == "2":
