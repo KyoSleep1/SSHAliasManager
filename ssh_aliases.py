@@ -5,6 +5,9 @@ from pathlib import Path
 from ssh_config import SSHConfig
 
 
+APP_NAME = "SSH Alias Manager"
+
+
 def list_aliases(config):
     entries = config.list_aliases()
     if not entries:
@@ -40,7 +43,7 @@ def import_aliases(config, path):
 
 def menu(config):
     while True:
-        print("\nSSH aliases\n1. List\n2. Add\n3. Rename\n4. Remove\n5. Import\n0. Quit")
+        print(f"\n{APP_NAME}\n1. List\n2. Add\n3. Rename\n4. Remove\n5. Import\n0. Quit")
         action = input("Choose an option: ").strip()
         try:
             if action == "0":
@@ -75,7 +78,7 @@ def menu(config):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Manage OpenSSH aliases or open an interactive menu.")
+    parser = argparse.ArgumentParser(description=f"{APP_NAME} manages OpenSSH aliases.")
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("list", help="List SSH aliases")
 

@@ -1,4 +1,4 @@
-# SSH aliases
+# SSH Alias Manager
 
 Create, list, rename, remove, and import OpenSSH aliases on macOS, Linux, and Windows. Connect with `ssh ALIAS` after saving an alias in your user SSH config.
 
