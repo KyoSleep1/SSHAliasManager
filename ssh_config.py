@@ -4,6 +4,7 @@ import ipaddress
 import os
 import re
 import tempfile
+from collections import Counter
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -132,8 +133,14 @@ class ConfigFile:
                 continue
             other_positive = any(arg.value != alias and not arg.value.startswith("!") for arg in group)
             if replacement is None and not other_positive:
-                while end > start + 1 and self.lines[end - 1].lstrip().startswith(("#", "\n", "\r")):
-                    end -= 1
+                tail = end
+                while tail > start + 1:
+                    line = self.lines[tail - 1].lstrip()
+                    if line and not line.startswith("#"):
+                        break
+                    tail -= 1
+                if any(line.lstrip().startswith("#") for line in self.lines[tail:end]):
+                    end = tail
                 del self.lines[start:end]
                 continue
 
@@ -192,10 +199,11 @@ class SSHConfig:
         return path.is_relative_to(self.root) and (not path.exists() or path.stat().st_uid == os.geteuid())
 
     def list_aliases(self):
+        entries = [(alias, file.path) for file in self.files().values() for alias in file.aliases()]
+        counts = Counter(alias for alias, _ in entries)
         return sorted(
-            (alias, file.path, self.editable(file.path))
-            for file in self.files().values()
-            for alias in file.aliases()
+            (alias, path, counts[alias] == 1 and self.editable(path))
+            for alias, path in entries
         )
 
     @contextmanager
