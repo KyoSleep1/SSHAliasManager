@@ -7,7 +7,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from ssh_config import WINDOWS, identity_options, restrict_windows_file
+from ssh_config import WINDOWS, connection_options, identity_options, restrict_windows_file
 
 
 SESSION_OPTIONS = [
@@ -22,9 +22,9 @@ SESSION_OPTIONS = [
 ]
 
 
-def effective_target(alias):
+def effective_target(alias, options):
     try:
-        result = subprocess.run(["ssh", "-G", "-T", "--", alias], stdout=subprocess.PIPE,
+        result = subprocess.run(["ssh", "-G", "-T", *options, "--", alias], stdout=subprocess.PIPE,
                                 check=True, timeout=15)
     except subprocess.CalledProcessError as error:
         raise ValueError(f"OpenSSH could not load alias '{alias}'.") from error
@@ -41,6 +41,7 @@ def local_identity(config, target):
     directory = config.root / "ssh-alias-manager"
     name = "id_ed25519_" + hashlib.sha256(target).hexdigest()[:32]
     identity = directory / name
+    config.root.mkdir(mode=0o700, exist_ok=True)
     with config.locked():
         directory.mkdir(mode=0o700, exist_ok=True)
         if directory.resolve() != directory or identity.is_symlink():
@@ -78,41 +79,65 @@ def install_command(identity):
     )
 
 
-def key_login_works(alias, identity=None):
-    command = ["ssh", *SESSION_OPTIONS, "-o", "BatchMode=yes", "-o", "PreferredAuthentications=publickey"]
+def key_login_works(alias, options, identity=None):
+    command = ["ssh", *SESSION_OPTIONS, *options, "-o", "BatchMode=yes", "-o", "PreferredAuthentications=publickey"]
     if identity is not None:
         key_file, identities_only = identity_options(identity)
         command.extend(["-o", key_file.strip(), "-o", identities_only.strip()])
     try:
         result = subprocess.run([*command, "--", alias, "exit"], stdin=subprocess.DEVNULL,
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+                                errors="replace", timeout=20)
     except subprocess.TimeoutExpired as error:
         raise ValueError(f"SSH timed out while verifying key login for '{alias}'.") from error
+    detail = result.stderr.strip()
+    if result.returncode == 255 and detail and not re.search(
+        r"permission denied \(|host key verification failed|too many authentication failures", detail, re.I
+    ):
+        raise ValueError(f"SSH failed for '{alias}'.\n{detail}")
     return result.returncode == 0
 
 
-def setup_key(config, alias):
+def authorize_key(config, alias, snapshot, options=()):
     if not sys.stdin.isatty():
         raise ValueError("Run key setup in an interactive terminal for the SSH prompts.")
-    snapshot = config.identity_snapshot(alias)
-    target = effective_target(alias)
-    if key_login_works(alias):
-        return
+    print(f"Checking SSH access for '{alias}'...", flush=True)
+    target = effective_target(alias, options)
+    if key_login_works(alias, options):
+        return None
 
     identity = local_identity(config, target)
-    if not key_login_works(alias, identity):
-        if config.identity_snapshot(alias) != snapshot:
-            raise ValueError("The SSH config changed during setup. Run key setup again.")
-        print("Complete the OpenSSH prompts to authorize the key on the server.", flush=True)
+    if not key_login_works(alias, options, identity):
+        if config.setup_snapshot(alias, adding=bool(options)) != snapshot:
+            raise ValueError("The SSH config changed during setup. Try again.")
+        print(f"Authorizing a key for '{alias}'. Enter the password at the OpenSSH prompt.", flush=True)
         command = [
-            "ssh", *SESSION_OPTIONS, "-o", "BatchMode=no", "-o", "PasswordAuthentication=yes",
+            "ssh", *SESSION_OPTIONS, *options, "-o", "BatchMode=no", "-o", "PasswordAuthentication=yes",
+            "-o", "NumberOfPasswordPrompts=1",
             "-o", "PreferredAuthentications=keyboard-interactive,password",
             "--", alias, install_command(identity),
         ]
-        result = subprocess.run(command, env={**os.environ, "SSH_ASKPASS_REQUIRE": "never"})
+        try:
+            result = subprocess.run(command, env={**os.environ, "SSH_ASKPASS_REQUIRE": "never"}, timeout=120)
+        except subprocess.TimeoutExpired as error:
+            raise ValueError(f"SSH key authorization timed out for '{alias}'.") from error
         if result.returncode:
             raise ValueError(f"SSH could not authorize the key for '{alias}'.")
-        if not key_login_works(alias, identity):
+        if not key_login_works(alias, options, identity):
             raise ValueError(f"The server did not accept the key for '{alias}'. Check its public key settings.")
 
-    config.attach_identity(alias, identity, snapshot)
+    return identity
+
+
+def setup_key(config, alias):
+    snapshot = config.setup_snapshot(alias)
+    identity = authorize_key(config, alias, snapshot)
+    if identity is not None:
+        config.attach_identity(alias, identity, snapshot)
+
+
+def setup_new_alias(config, alias, host, user, port):
+    options = [argument for option in connection_options(host, user, port) for argument in ("-o", option)]
+    snapshot = config.setup_snapshot(alias, adding=True)
+    identity = authorize_key(config, alias, snapshot, options)
+    config.add(alias, host, user, port, identity, snapshot=snapshot)

@@ -75,8 +75,7 @@ def identity_options(identity):
     return [f'    IdentityFile "{quoted}"', "    IdentitiesOnly yes"]
 
 
-def host_entry(alias, host, user, port, identity):
-    require_alias(alias)
+def connection_options(host, user, port):
     if ":" in host:
         try:
             address = ipaddress.IPv6Address(host)
@@ -92,7 +91,13 @@ def host_entry(alias, host, user, port, identity):
         raise ValueError("Enter a port from 1 to 65535.")
 
     hostname = host.replace("%", "%%")
-    lines = [f"Host {alias}", f"    HostName {hostname}", f"    User {user}", f"    Port {int(port)}"]
+    return [f"HostName {hostname}", f"User {user}", f"Port {int(port)}"]
+
+
+def host_entry(alias, host, user, port, identity):
+    require_alias(alias)
+    lines = [f"Host {alias}"]
+    lines.extend(f"    {option}" for option in connection_options(host, user, port))
     if identity:
         lines.extend(identity_options(identity))
     return "\n".join(lines) + "\n\n"
@@ -239,6 +244,15 @@ def read_config(path):
         return ""
 
 
+def config_contents(files):
+    return {path: document.original for path, document in files.items()}
+
+
+def require_unchanged(files, snapshot):
+    if snapshot is not None and config_contents(files) != snapshot:
+        raise ValueError("The SSH config changed during setup. Try again.")
+
+
 def validate_import(content, aliases):
     with tempfile.TemporaryDirectory(prefix="ssh-alias-import-") as directory:
         path = Path(directory) / "config"
@@ -317,16 +331,21 @@ class SSHConfig:
         finally:
             os.close(directory)
 
-    def add(self, alias, host, user, port=22, identity=None):
+    def add_destination(self, alias, files):
+        document = files[self.path.resolve()]
+        if not self.editable(document.path):
+            raise ValueError("The main SSH config is read-only in this tool.")
+        if any(alias in file.aliases() for file in files.values()):
+            raise ValueError(f"Alias '{alias}' already exists.")
+        return document
+
+    def add(self, alias, host, user, port=22, identity=None, *, snapshot=None):
         content = host_entry(alias, host, user, port, identity)
         self.root.mkdir(mode=0o700, exist_ok=True)
         with self.locked():
             files = self.files()
-            document = files[self.path.resolve()]
-            if not self.editable(document.path):
-                raise ValueError("The main SSH config is read-only in this tool.")
-            if any(alias in file.aliases() for file in files.values()):
-                raise ValueError(f"Alias '{alias}' already exists.")
+            require_unchanged(files, snapshot)
+            document = self.add_destination(alias, files)
             document.prepend(content)
 
     def import_file(self, path):
@@ -375,16 +394,19 @@ class SSHConfig:
             raise ValueError(f"Alias '{alias}' is read-only in this tool.")
         return document
 
-    def identity_snapshot(self, alias):
+    def setup_snapshot(self, alias, *, adding=False):
+        require_alias(alias)
         files = self.files()
-        self.editable_alias(alias, files)
-        return {path: file.original for path, file in files.items()}
+        if adding:
+            self.add_destination(alias, files)
+        else:
+            self.editable_alias(alias, files)
+        return config_contents(files)
 
     def attach_identity(self, alias, identity, snapshot):
         with self.locked():
             files = self.files()
-            if {path: file.original for path, file in files.items()} != snapshot:
-                raise ValueError("The SSH config changed during setup. Run key setup again.")
+            require_unchanged(files, snapshot)
             document = self.editable_alias(alias, files)
             document.prepend("\n".join([f"Host {alias}", *identity_options(identity)]) + "\n\n")
 

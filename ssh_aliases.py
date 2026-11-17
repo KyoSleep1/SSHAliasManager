@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 from ssh_config import SSHConfig
-from ssh_key_setup import setup_key
+from ssh_key_setup import setup_key, setup_new_alias
 
 
 APP_NAME = "SSH Alias Manager"
@@ -20,13 +20,11 @@ def list_aliases(config):
 
 
 def add_alias(config, alias, host, user, port, identity, configure_key=False):
-    if configure_key and not sys.stdin.isatty():
-        raise ValueError("Run key setup in an interactive terminal for the SSH prompts.")
-    config.add(alias, host, user, port, identity)
     if configure_key:
-        print(f"Saved '{alias}'.")
-        setup_alias_key(config, alias)
+        setup_new_alias(config, alias, host, user, port)
+        print(f"Saved '{alias}'. Key login works. Connect with ssh {alias}.")
     else:
+        config.add(alias, host, user, port, identity)
         print(f"Saved '{alias}'. Connect with ssh {alias}.")
 
 
@@ -84,6 +82,8 @@ def menu(config):
                     import_aliases(config, path)
             else:
                 print("Choose a listed option.")
+        except KeyboardInterrupt:
+            print("\nOperation canceled.")
         except (OSError, ValueError) as error:
             print(f"Error: {error}", file=sys.stderr)
 

@@ -13,7 +13,7 @@ Requires Python 3.9+ and the OpenSSH client. Run `./ssh-aliases.sh` for the term
 
 ## Key login
 
-The **Add** menu starts key setup after you enter the connection details. Enter the password at the one-time OpenSSH prompt when asked. The tool creates a local Ed25519 key without a passphrase, installs the public key, and verifies key login before updating the alias. To set up an existing alias, run `./ssh-aliases.sh setup-key ALIAS` in a terminal.
+The **Add** menu starts key setup after you enter the connection details. Enter the password at the one-time OpenSSH prompt when asked. The tool creates a local Ed25519 key without a passphrase, installs the public key, and saves the new alias only after key login succeeds. Press **Ctrl+C** to cancel setup. To set up an existing alias, run `./ssh-aliases.sh setup-key ALIAS` in a terminal.
 
 Automatic installation works from Windows, macOS, and Linux clients with servers that use a POSIX shell and the standard `~/.ssh/authorized_keys` file. For Windows servers, follow [Microsoft's key setup guide](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh-keymanagement) and add the alias using the local private key path.
 
