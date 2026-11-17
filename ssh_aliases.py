@@ -30,9 +30,17 @@ def remove_alias(config, alias):
     print(f"Removed '{alias}'.")
 
 
+def import_aliases(config, path):
+    added, skipped = config.import_file(Path(path))
+    if added:
+        print("Imported " + ", ".join(added) + ".")
+    if skipped:
+        print("Skipped existing aliases " + ", ".join(skipped) + ".")
+
+
 def menu(config):
     while True:
-        print("\nSSH aliases\n1. List\n2. Add\n3. Rename\n4. Remove\n0. Quit")
+        print("\nSSH aliases\n1. List\n2. Add\n3. Rename\n4. Remove\n5. Import\n0. Quit")
         action = input("Choose an option: ").strip()
         try:
             if action == "0":
@@ -56,6 +64,10 @@ def menu(config):
                 alias = input("Alias to remove: ").strip()
                 if input(f"Remove '{alias}'? [y/N]: ").strip().lower() == "y":
                     remove_alias(config, alias)
+            elif action == "5":
+                path = input("OpenSSH config file path: ").strip()
+                if path:
+                    import_aliases(config, path)
             else:
                 print("Choose a listed option.")
         except (OSError, ValueError) as error:
@@ -81,6 +93,9 @@ def main():
     remove = commands.add_parser("remove", help="Remove an SSH alias")
     remove.add_argument("alias")
 
+    import_command = commands.add_parser("import", help="Import named aliases from an OpenSSH config")
+    import_command.add_argument("path", help="Path to the OpenSSH config file")
+
     args = parser.parse_args()
     config = SSHConfig(Path.home() / ".ssh")
     try:
@@ -92,6 +107,8 @@ def main():
             rename_alias(config, args.alias, args.new_alias)
         elif args.command == "remove":
             remove_alias(config, args.alias)
+        elif args.command == "import":
+            import_aliases(config, args.path)
         elif sys.stdin.isatty():
             menu(config)
         else:
