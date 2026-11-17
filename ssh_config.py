@@ -131,9 +131,47 @@ class ConfigFile:
             if ALIAS.fullmatch(arg.value)
         }
 
+    def section_ranges(self):
+        boundaries = [*self.sections, len(self.lines)]
+        return zip(boundaries, boundaries[1:])
+
+    def import_sections(self):
+        for start, end in self.section_ranges():
+            group = self.sections[start]
+            excluded = [
+                re.compile(re.escape(arg.value[1:]).replace(r"\*", ".*").replace(r"\?", "."))
+                for arg in group
+                if arg.value.startswith("!")
+            ]
+            aliases = dict.fromkeys(
+                arg.value
+                for arg in group
+                if ALIAS.fullmatch(arg.value) and not any(pattern.fullmatch(arg.value) for pattern in excluded)
+            )
+            if aliases:
+                yield start, end, aliases
+
+    def import_block(self, start, end, aliases):
+        lines = ["Host " + " ".join(aliases)]
+        for index in range(start + 1, end):
+            line = self.lines[index].rstrip("\r\n")
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            directive = DIRECTIVE.match(line)
+            if directive is None or directive[1].lower() == "include":
+                raise ValueError(f"{self.path}:{index + 1} is not a standalone host option.")
+            lines.append(line)
+        return "\n".join(lines) + "\n\n"
+
+    def prepend(self, content):
+        if self.first_directive not in (None, "host", "match"):
+            content += "Host *\n\n"
+        if "\r\n" in self.original or (WINDOWS and not self.original):
+            content = content.replace("\n", "\r\n")
+        self.save(content + self.original)
+
     def replace_alias(self, alias, replacement):
-        ends = [*self.sections.keys(), len(self.lines)]
-        for start, end in reversed(list(zip(ends, ends[1:]))):
+        for start, end in reversed(list(self.section_ranges())):
             group = self.sections[start]
             matches = [arg for arg in group if arg.value == alias]
             if not matches:
@@ -195,6 +233,27 @@ def read_config(path):
         return path.read_bytes().decode("utf-8", errors="surrogateescape")
     except FileNotFoundError:
         return ""
+
+
+def validate_import(content, aliases):
+    with tempfile.TemporaryDirectory(prefix="ssh-alias-import-") as directory:
+        path = Path(directory) / "config"
+        path.write_bytes(content.encode("utf-8", errors="surrogateescape"))
+        for alias in aliases:
+            try:
+                subprocess.run(
+                    ["ssh", "-T", "-G", "-F", str(path), "-o", "CanonicalizeHostname=no", "--", alias],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    errors="replace",
+                    check=True,
+                    timeout=10,
+                )
+            except subprocess.CalledProcessError as error:
+                raise ValueError(f"OpenSSH rejected alias '{alias}'.\n{error.stderr.strip()}") from error
+            except subprocess.TimeoutExpired as error:
+                raise ValueError(f"OpenSSH timed out while checking alias '{alias}'.") from error
 
 
 class SSHConfig:
@@ -264,11 +323,41 @@ class SSHConfig:
                 raise ValueError("The main SSH config is read-only in this tool.")
             if any(alias in file.aliases() for file in files.values()):
                 raise ValueError(f"Alias '{alias}' already exists.")
-            if document.first_directive not in (None, "host", "match"):
-                content += "Host *\n\n"
-            if "\r\n" in document.original or (WINDOWS and not document.original):
-                content = content.replace("\n", "\r\n")
-            document.save(content + document.original)
+            document.prepend(content)
+
+    def import_file(self, path):
+        path = path.expanduser().resolve(strict=True)
+        if not path.is_file():
+            raise ValueError("Choose a regular OpenSSH config file.")
+        content = path.read_bytes().decode("utf-8-sig", errors="surrogateescape")
+        content = content.replace("\r\n", "\n")
+        if any(ord(char) < 32 and char not in "\n\t" for char in content):
+            raise ValueError("Choose a text OpenSSH config file.")
+        source = ConfigFile(path, content)
+        sections = list(source.import_sections())
+        incoming = {alias for _, _, aliases in sections for alias in aliases}
+        if not incoming:
+            raise ValueError("No named SSH aliases were found in the source file.")
+
+        self.root.mkdir(mode=0o700, exist_ok=True)
+        with self.locked():
+            files = self.files()
+            existing = {alias for file in files.values() for alias in file.aliases()}
+            added = sorted(incoming - existing)
+            skipped = sorted(incoming & existing)
+            if added:
+                destination = files[self.path.resolve()]
+                if not self.editable(destination.path):
+                    raise ValueError("The main SSH config is read-only in this tool.")
+                blocks = []
+                for start, end, aliases in sections:
+                    new_aliases = [alias for alias in aliases if alias not in existing]
+                    if new_aliases:
+                        blocks.append(source.import_block(start, end, new_aliases))
+                content = "".join(blocks)
+                validate_import(content, added)
+                destination.prepend(content)
+            return added, skipped
 
     def change(self, alias, replacement=None):
         require_alias(alias)
