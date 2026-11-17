@@ -55,7 +55,7 @@ def import_aliases(config, path):
 
 def menu(config):
     while True:
-        print(f"\n{APP_NAME}\n1. List\n2. Add\n3. Rename\n4. Remove\n5. Import\n6. Set up key login\n0. Quit")
+        print(f"\n{APP_NAME}\n1. List\n2. Add\n3. Rename\n4. Remove\n5. Import\n0. Quit")
         action = input("Choose an option: ").strip()
         try:
             if action == "0":
@@ -82,10 +82,6 @@ def menu(config):
                 path = input("OpenSSH config file path: ").strip()
                 if path:
                     import_aliases(config, path)
-            elif action == "6":
-                list_aliases(config)
-                alias = input("Alias for key setup: ").strip()
-                setup_alias_key(config, alias)
             else:
                 print("Choose a listed option.")
         except (OSError, ValueError) as error:
