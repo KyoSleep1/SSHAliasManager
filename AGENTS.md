@@ -1,6 +1,7 @@
 # Repository instructions
 
 - Write code, user-facing tool text, documentation, and commit messages in English.
+- Support native OpenSSH on macOS, Linux, and Windows.
 - Keep code free of comments.
 - Keep the README brief. Explain what the tool does and how an agent should collect access fields and configure aliases.
 - Keep server-specific values out of repository files.

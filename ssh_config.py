@@ -1,8 +1,8 @@
-import fcntl
 import glob
 import ipaddress
 import os
 import re
+import subprocess
 import tempfile
 from collections import Counter
 from contextlib import contextmanager
@@ -10,8 +10,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+WINDOWS = os.name == "nt"
+if WINDOWS:
+    import msvcrt
+else:
+    import fcntl
+
+
 ALIAS = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
-USER = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.@-]*")
+USER = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.@-]*(?:\\[A-Za-z0-9_][A-Za-z0-9_.@-]*)?")
 DIRECTIVE = re.compile(r"^[ \t]*([A-Za-z][A-Za-z0-9]*)(?=[ \t=]|$)[ \t]*=?[ \t]*")
 
 
@@ -79,7 +86,7 @@ def host_entry(alias, host, user, port, identity):
     hostname = host.replace("%", "%%")
     lines = [f"Host {alias}", f"    HostName {hostname}", f"    User {user}", f"    Port {int(port)}"]
     if identity:
-        path = str(Path(identity).expanduser().absolute())
+        path = Path(identity).expanduser().absolute().as_posix()
         if any(ord(char) < 32 or ord(char) == 127 for char in path) or "${" in path:
             raise ValueError("Enter a local key path without control characters or variable references.")
         quoted = path.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
@@ -150,18 +157,37 @@ class ConfigFile:
             self.lines[start] = header
 
     def save(self, content):
-        with tempfile.NamedTemporaryFile(dir=self.path.parent, prefix=".ssh-aliases-", delete=False) as temp:
-            pending = Path(temp.name)
-            try:
+        with tempfile.NamedTemporaryFile(dir=self.path.parent, prefix=".ssh-aliases-", delete=False) as staged:
+            pending = Path(staged.name)
+        try:
+            if WINDOWS:
+                restrict_windows_file(pending)
+            with pending.open("wb") as temp:
                 temp.write(content.encode("utf-8", errors="surrogateescape"))
                 temp.flush()
                 os.fsync(temp.fileno())
-                temp.close()
-                if read_config(self.path) != self.original:
-                    raise ValueError(f"{self.path} changed. Try again.")
-                pending.replace(self.path)
-            finally:
-                pending.unlink(missing_ok=True)
+            if read_config(self.path) != self.original:
+                raise ValueError(f"{self.path} changed. Try again.")
+            pending.replace(self.path)
+        finally:
+            pending.unlink(missing_ok=True)
+
+
+def restrict_windows_file(path):
+    system_root = os.environ.get("SystemRoot")
+    if not system_root:
+        raise OSError("Could not locate the Windows system directory.")
+    system = Path(system_root) / "System32"
+    try:
+        result = subprocess.run([system / "whoami.exe", "/user", "/fo", "csv", "/nh"],
+                                capture_output=True, check=True, timeout=10)
+        sid = result.stdout.strip().rsplit(b",", 1)[-1].strip(b' "')
+        if not re.fullmatch(rb"S-[0-9]+(?:-[0-9]+)+", sid):
+            raise OSError("Could not identify the current Windows user.")
+        subprocess.run([system / "icacls.exe", path, "/inheritance:r", "/grant:r", f"*{sid.decode('ascii')}:F"],
+                       capture_output=True, check=True, timeout=10)
+    except subprocess.SubprocessError as error:
+        raise OSError("Could not restrict the Windows SSH config permissions.") from error
 
 
 def read_config(path):
@@ -196,7 +222,9 @@ class SSHConfig:
         return files
 
     def editable(self, path):
-        return path.is_relative_to(self.root) and (not path.exists() or path.stat().st_uid == os.geteuid())
+        return path.is_relative_to(self.root) and (
+            WINDOWS or not path.exists() or path.stat().st_uid == os.geteuid()
+        )
 
     def list_aliases(self):
         entries = [(alias, file.path) for file in self.files().values() for alias in file.aliases()]
@@ -208,6 +236,17 @@ class SSHConfig:
 
     @contextmanager
     def locked(self):
+        if WINDOWS:
+            with (self.root / ".ssh-aliases.lock").open("a+b") as lock:
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+                try:
+                    yield
+                finally:
+                    lock.seek(0)
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+            return
+
         directory = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
         try:
             fcntl.flock(directory, fcntl.LOCK_EX)
@@ -227,6 +266,8 @@ class SSHConfig:
                 raise ValueError(f"Alias '{alias}' already exists.")
             if document.first_directive not in (None, "host", "match"):
                 content += "Host *\n\n"
+            if "\r\n" in document.original or (WINDOWS and not document.original):
+                content = content.replace("\n", "\r\n")
             document.save(content + document.original)
 
     def change(self, alias, replacement=None):

@@ -1,8 +1,8 @@
 # SSH aliases
 
-Create, list, rename, and remove OpenSSH aliases on macOS or Linux. Connect with `ssh ALIAS` after saving an alias to `~/.ssh/config`.
+Create, list, rename, and remove OpenSSH aliases on macOS, Linux, and Windows. Connect with `ssh ALIAS` after saving an alias in your user SSH config.
 
-Run `python3 ssh_aliases.py` for the terminal menu. Requires Python 3.9+ and OpenSSH.
+Requires Python 3.9+ and the OpenSSH client. Run `python3 ssh_aliases.py` for the terminal menu. On Windows, use `py -3 ssh_aliases.py` and replace `python3` with `py -3` in the commands below.
 
 ## Agent setup
 
