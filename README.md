@@ -7,9 +7,17 @@ Requires Python 3.9+ and the OpenSSH client. Run `python3 ssh_aliases.py` for th
 ## Agent setup
 
 1. Run `python3 ssh_aliases.py list` to see existing aliases.
-2. Ask for an alias, hostname or IP address, SSH username, port (default `22`), and optional local private key path. Let SSH prompt for passwords or key passphrases locally.
+2. Ask for an alias, hostname or IP address, SSH username, port (default `22`), and optional local private key path. Let OpenSSH handle passwords and key passphrases in the user's terminal.
 3. Run `python3 ssh_aliases.py add ALIAS --host HOST --user USERNAME` with the supplied values. Add `--port PORT` and `--identity-file PATH` when supplied. Pass user values as individual arguments.
 4. Confirm the alias was saved and give the user `ssh ALIAS`.
+
+## Key login
+
+For password-free login, choose **Set up key login** or run `python3 ssh_aliases.py setup-key ALIAS` in a terminal. For a new alias, choose key setup during **Add** or pass `--setup-key` to `add`. Enter the password at the one-time OpenSSH prompt. The tool creates a local Ed25519 key without a passphrase, installs the public key, and verifies key login before updating the alias.
+
+Automatic installation works from Windows, macOS, and Linux clients with servers that use a POSIX shell and the standard `~/.ssh/authorized_keys` file. For Windows servers, follow [Microsoft's key setup guide](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh-keymanagement) and add the alias using the local private key path.
+
+## Manage existing aliases
 
 For an existing OpenSSH config, ask for its path and run `python3 ssh_aliases.py import PATH`. The terminal menu also has **Import**. Import copies standalone named `Host` entries with their per-host options and skips existing aliases. Import included files individually.
 

@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 from ssh_config import SSHConfig
+from ssh_key_setup import setup_key
 
 
 APP_NAME = "SSH Alias Manager"
@@ -18,9 +19,20 @@ def list_aliases(config):
         print(f"{alias}\t{path}{status}")
 
 
-def add_alias(config, alias, host, user, port, identity):
+def add_alias(config, alias, host, user, port, identity, configure_key=False):
+    if configure_key and not sys.stdin.isatty():
+        raise ValueError("Run key setup in an interactive terminal for the SSH prompts.")
     config.add(alias, host, user, port, identity)
-    print(f"Saved '{alias}'. Connect with ssh {alias}.")
+    if configure_key:
+        print(f"Saved '{alias}'.")
+        setup_alias_key(config, alias)
+    else:
+        print(f"Saved '{alias}'. Connect with ssh {alias}.")
+
+
+def setup_alias_key(config, alias):
+    setup_key(config, alias)
+    print(f"Key login works. Connect with ssh {alias}.")
 
 
 def rename_alias(config, alias, new_alias):
@@ -43,7 +55,7 @@ def import_aliases(config, path):
 
 def menu(config):
     while True:
-        print(f"\n{APP_NAME}\n1. List\n2. Add\n3. Rename\n4. Remove\n5. Import\n0. Quit")
+        print(f"\n{APP_NAME}\n1. List\n2. Add\n3. Rename\n4. Remove\n5. Import\n6. Set up key login\n0. Quit")
         action = input("Choose an option: ").strip()
         try:
             if action == "0":
@@ -56,7 +68,8 @@ def menu(config):
                 user = input("SSH username: ").strip()
                 port = input("Port [22]: ").strip() or 22
                 identity = input("Private key path [optional]: ").strip() or None
-                add_alias(config, alias, host, user, port, identity)
+                configure_key = not identity and input("Set up key login now? [y/N]: ").strip().lower() == "y"
+                add_alias(config, alias, host, user, port, identity, configure_key)
             elif action == "3":
                 list_aliases(config)
                 alias = input("Current alias: ").strip()
@@ -71,6 +84,10 @@ def menu(config):
                 path = input("OpenSSH config file path: ").strip()
                 if path:
                     import_aliases(config, path)
+            elif action == "6":
+                list_aliases(config)
+                alias = input("Alias for key setup: ").strip()
+                setup_alias_key(config, alias)
             else:
                 print("Choose a listed option.")
         except (OSError, ValueError) as error:
@@ -87,7 +104,12 @@ def main():
     add.add_argument("--host", required=True, help="Hostname or IP address")
     add.add_argument("--user", required=True, help="SSH username")
     add.add_argument("--port", default=22, help="SSH port (default: 22)")
-    add.add_argument("--identity-file", help="Path to a local private key")
+    authentication = add.add_mutually_exclusive_group()
+    authentication.add_argument("--identity-file", help="Path to a local private key")
+    authentication.add_argument("--setup-key", action="store_true", help="Set up key login interactively")
+
+    key_setup = commands.add_parser("setup-key", help="Set up key login for an existing alias")
+    key_setup.add_argument("alias")
 
     rename = commands.add_parser("rename", help="Rename an SSH alias")
     rename.add_argument("alias")
@@ -105,7 +127,9 @@ def main():
         if args.command == "list":
             list_aliases(config)
         elif args.command == "add":
-            add_alias(config, args.alias, args.host, args.user, args.port, args.identity_file)
+            add_alias(config, args.alias, args.host, args.user, args.port, args.identity_file, args.setup_key)
+        elif args.command == "setup-key":
+            setup_alias_key(config, args.alias)
         elif args.command == "rename":
             rename_alias(config, args.alias, args.new_alias)
         elif args.command == "remove":
