@@ -8,12 +8,12 @@ Requires Python 3.9+ and the OpenSSH client. Run `python3 ssh_aliases.py` for th
 
 1. Run `python3 ssh_aliases.py list` to see existing aliases.
 2. Ask for an alias, hostname or IP address, SSH username, port (default `22`), and optional local private key path. Let OpenSSH handle passwords and key passphrases in the user's terminal.
-3. Run `python3 ssh_aliases.py add ALIAS --host HOST --user USERNAME` with the supplied values. Add `--port PORT` and `--identity-file PATH` when supplied. Pass user values as individual arguments.
+3. Run `python3 ssh_aliases.py add ALIAS --host HOST --user USERNAME` with the supplied values. Add `--port PORT` when supplied. Use `--identity-file PATH` for an existing key or `--setup-key` in the user's terminal to set up key login during Add. Pass user values as individual arguments.
 4. Confirm the alias was saved and give the user `ssh ALIAS`.
 
 ## Key login
 
-For password-free login, choose **Set up key login** or run `python3 ssh_aliases.py setup-key ALIAS` in a terminal. For a new alias, choose key setup during **Add** or pass `--setup-key` to `add`. Enter the password at the one-time OpenSSH prompt. The tool creates a local Ed25519 key without a passphrase, installs the public key, and verifies key login before updating the alias.
+The **Add** menu starts key setup after you enter the connection details. Enter the password at the one-time OpenSSH prompt when asked. The tool creates a local Ed25519 key without a passphrase, installs the public key, and verifies key login before updating the alias. To set up an existing alias, choose **Set up key login** or run `python3 ssh_aliases.py setup-key ALIAS` in a terminal.
 
 Automatic installation works from Windows, macOS, and Linux clients with servers that use a POSIX shell and the standard `~/.ssh/authorized_keys` file. For Windows servers, follow [Microsoft's key setup guide](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh-keymanagement) and add the alias using the local private key path.
 

@@ -67,9 +67,7 @@ def menu(config):
                 host = input("Hostname or IP address: ").strip()
                 user = input("SSH username: ").strip()
                 port = input("Port [22]: ").strip() or 22
-                identity = input("Private key path [optional]: ").strip() or None
-                configure_key = not identity and input("Set up key login now? [y/N]: ").strip().lower() == "y"
-                add_alias(config, alias, host, user, port, identity, configure_key)
+                add_alias(config, alias, host, user, port, identity=None, configure_key=True)
             elif action == "3":
                 list_aliases(config)
                 alias = input("Current alias: ").strip()
