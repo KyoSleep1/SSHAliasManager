@@ -67,6 +67,14 @@ def require_alias(alias):
                          "Start with a letter, number, or underscore.")
 
 
+def identity_options(identity):
+    path = Path(identity).expanduser().absolute().as_posix()
+    if any(ord(char) < 32 or ord(char) == 127 for char in path) or "${" in path:
+        raise ValueError("Enter a local key path without control characters or variable references.")
+    quoted = path.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
+    return [f'    IdentityFile "{quoted}"', "    IdentitiesOnly yes"]
+
+
 def host_entry(alias, host, user, port, identity):
     require_alias(alias)
     if ":" in host:
@@ -86,11 +94,7 @@ def host_entry(alias, host, user, port, identity):
     hostname = host.replace("%", "%%")
     lines = [f"Host {alias}", f"    HostName {hostname}", f"    User {user}", f"    Port {int(port)}"]
     if identity:
-        path = Path(identity).expanduser().absolute().as_posix()
-        if any(ord(char) < 32 or ord(char) == 127 for char in path) or "${" in path:
-            raise ValueError("Enter a local key path without control characters or variable references.")
-        quoted = path.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
-        lines.extend([f'    IdentityFile "{quoted}"', "    IdentitiesOnly yes"])
+        lines.extend(identity_options(identity))
     return "\n".join(lines) + "\n\n"
 
 
@@ -359,22 +363,40 @@ class SSHConfig:
                 destination.prepend(content)
             return added, skipped
 
-    def change(self, alias, replacement=None):
+    def editable_alias(self, alias, files):
         require_alias(alias)
+        matches = [file for file in files.values() if alias in file.aliases()]
+        if not matches:
+            raise ValueError(f"Alias '{alias}' was not found.")
+        if len(matches) != 1:
+            raise ValueError(f"Alias '{alias}' is defined in multiple files.")
+        document = matches[0]
+        if not self.editable(document.path):
+            raise ValueError(f"Alias '{alias}' is read-only in this tool.")
+        return document
+
+    def identity_snapshot(self, alias):
+        files = self.files()
+        self.editable_alias(alias, files)
+        return {path: file.original for path, file in files.items()}
+
+    def attach_identity(self, alias, identity, snapshot):
+        with self.locked():
+            files = self.files()
+            if {path: file.original for path, file in files.items()} != snapshot:
+                raise ValueError("The SSH config changed during setup. Run key setup again.")
+            document = self.editable_alias(alias, files)
+            document.prepend("\n".join([f"Host {alias}", *identity_options(identity)]) + "\n\n")
+
+    def change(self, alias, replacement=None):
         if replacement is not None:
             require_alias(replacement)
         if not self.root.exists():
+            require_alias(alias)
             raise ValueError(f"Alias '{alias}' was not found.")
         with self.locked():
             files = self.files()
-            matches = [file for file in files.values() if alias in file.aliases()]
-            if not matches:
-                raise ValueError(f"Alias '{alias}' was not found.")
-            if len(matches) != 1:
-                raise ValueError(f"Alias '{alias}' is defined in multiple files.")
-            document = matches[0]
-            if not self.editable(document.path):
-                raise ValueError(f"Alias '{alias}' is read-only in this tool.")
+            document = self.editable_alias(alias, files)
             if replacement == alias:
                 return
             if replacement is not None and any(replacement in file.aliases() for file in files.values()):
